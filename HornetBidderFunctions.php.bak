@@ -1,0 +1,111 @@
+<?php
+include ("connect.php");
+
+function DisplayMatches($categoryId) //displays matches based on the Category ID
+{
+	//finds category name based on category Id
+	$query="SELECT Name FROM Itemcategories I JOIN Categories C ON (I.Category=C.Id) WHERE C.Id=$1";
+	$result = pg_query_params($query, array($categoryId));
+	$arr = pg_fetch_array($result, NULL, PGSQL_ASSOC);
+	$categoryName = $arr["name"];
+	
+	//pulls information to display
+	$query="SELECT I.Id as id, I.Title as title, U.Username as username, I.Endtime-now() as timeleft, 
+		I.Description as description, I.Price as price FROM Item I JOIN ItemCategories C ON (I.Id=C.AuctionNum)
+		JOIN Users U ON (I.Seller=U.Id) WHERE C.Category=$1 AND I.Endtime > now() AND I.Status='active'";
+	$result = pg_query_params($query, array($categoryId));
+	$numMatches = pg_numrows($result);
+
+	//Number of matches for current category
+	echo "<H2>".$numMatches." Matches found for ".$categoryName.":</H2><hr>";
+	
+	if ($numMatches > 0){ //show matches if any
+		while ($rowCat = pg_fetch_array($result, NULL, PGSQL_ASSOC)){
+			//$timeremaining = date("d",$rowCat["timeleft"])."days ".date("h:i:s",$rowCat["timeleft"]);
+			echo "Auction Number: ".$rowCat["id"]."  <b>".$rowCat["title"]."</b>  Username: <i>".$rowCat["username"].
+				"</i>  Remaining time:".$rowCat["timeleft"]."Current Price: $".$rowCat["price"]."<br /><u>Description:<br /></u>".$rowCat["description"]."<br />";
+			 if($_SESSION['UserId'] > 0){
+				echo '<FORM action="Bid.php" method="POST"><INPUT type="hidden" name="itemId" value="'.$rowCat["id"].
+					'"/><INPUT type="submit" name="Bid" value="Bid"/></FORM><hr>';
+			}
+		}
+	}
+}
+
+function UpdateStatus() 
+{//Changes status to closed if they were active and endtime has past
+ // also sends email to high bidder
+	$query="UPDATE Item SET Status='closed' WHERE Status='active' AND Endtime <= now() RETURNING Id";
+	$result=pg_query($query);
+	
+	if(pg_numrows($result) >0){ //send email
+		while ($row=pg_fetch_array($result, NULL, PGSQL_ASSOC)){
+			$query2='SELECT U.Fname as Fname, U.Lname as Lname, U.Email as Email, 
+				I.Id as ItemId, I.Title as Title, B.Bidder as Bidder, B.Id as BidId, B.AuctionNum as AuctionNum
+				FROM Users U JOIN Bids B ON (B.Bidder=U.Id) JOIN Item I ON (B.AuctionNum=I.Id)
+				WHERE I.Id=$1 AND B.Id 
+				IN (
+						SELECT Id 
+						FROM Bids 
+						WHERE AuctionNum = $1 AND Amount 
+						IN (
+							SELECT max(Amount) 
+							FROM Bids 
+							WHERE AuctionNum = $2
+							)
+						)'; //info of bidder
+			
+			$result2=pg_query_params($query2, array($row['id'],$row['id']));
+			$rowEmail=pg_fetch_array($result2, NULL, PGSQL_ASSOC);
+			if(pg_numrows($result2)>0){
+				//send email to winning bidder
+				$to = $rowEmail['email'];
+				$from = 'From: lp131cpp@hotmail.com';
+				$subject = 'Hornet Bidder';
+				$text = $rowEmail['fname']." ".$rowEmail['lname']." you have won item # ".$rowEmail['itemid']." ".$rowEmail['title'];
+				mail($to, $subject, $text, $from);//unable to send mail, possible server problem or spam blocks
+				//Create purchase record
+				$queryPurchase="INSERT INTO Purchases (Buyer, AuctionNum, BidNum, Status) VALUES ($1, $2, $3, 'pending')";
+				$resultPurchase=pg_query_params($queryPurchase, array($rowEmail['bidder'],$rowEmail['auctionnum'],$rowEmail['bidid']));
+			}
+		}
+	}
+
+}
+
+function DisplayToPurchase($UserId) //displays items to pay for
+{
+	//display list of auctions that user has won and need to buy   
+	$query="SELECT I.Id as Id, I.Title as Title, B.Amount as Price, P.Id as PurchaseId
+			FROM Purchases P LEFT JOIN Bids B ON (P.BidNum=B.Id) JOIN Item I ON (P.AuctionNum=I.Id)
+			WHERE P.Buyer=$1 AND P.Status='pending'";
+	$result=pg_query_params($query, array($UserId));
+	if (isset($_POST['Buy'])){
+		$queryUpdate="UPDATE Purchases SET Status = 'Paid', CC = md5($1) WHERE Id=$2";
+		$resultUpdate=pg_query_params($queryUpdate, array($_POST['cc'],$_POST['formSelect']));
+		echo "<center><h2>Item paid for</h2></center>";
+	}
+	else{
+		if(pg_numrows($result)>0){
+			
+			echo "<BR /><CENTER>Select a Item you wish to pay for.</CENTER><BR />";
+			echo '<CENTER><FORM name="formCategories" action='.$_SERVER['PHP_SELF'].' method="post">'; //repost to self.
+			echo '<select name="formSelect">';
+			while ($row = pg_fetch_array($result, NULL, PGSQL_ASSOC)){
+				echo '<option value="'.$row["purchaseid"].'">Id:'.$row["id"]." Title: ".$row["title"]." Price: ".$row["price"]."</option>";
+			}
+			echo "</select><br /><br />";
+			echo 'Fake credit card #<input type="password" name="cc"/><br /><br />';
+			echo '<input type="submit" value="submit" name="Buy"/>';
+			echo "</FORM></CENTER>";
+				
+		}
+		else {
+			echo "<center><h2>You do not have any items to pay for.</h2></center>";
+		}
+	}
+}
+
+
+
+?>

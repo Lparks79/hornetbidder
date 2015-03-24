@@ -1,0 +1,156 @@
+<?php session_start();
+include ("connect.php"); 
+include ("HornetBidderFunctions.php")
+?>
+<HTML>
+<head>
+<title>Hornet Bidder</title>
+<style>
+   /*Bar Styling */
+   #nav {
+      width: 100%;
+      float: left;
+      margin: 0 0 3em 0;
+      padding: 0;
+      list-style: none;
+      background-color: #008000;
+      border-bottom: 1px solid #ccc; 
+      border-top: 1px solid #ccc; }
+   #nav li {
+      float: left; }
+   #nav li a {
+      display: block;
+      padding: 8px 15px;
+      text-decoration: none;
+      font-weight: bold;
+      color: #FFFFFF;
+      border-right: 1px solid #ccc; }
+   #nav li a:hover {
+      color: #008000;
+      background-color: #fff; }
+   /* bar styling. */
+   
+   /* page styling */
+   body {
+      font: small/1.3 Arial, Helvetica, sans-serif; }
+   #wrap {
+      width: 750px;
+      margin: 0 auto;
+      background-color: #fff; }
+   h1 {
+      font-size: 1.5em;
+      padding: 1em 8px;
+      color: #333;
+      background-color: #008000;
+      margin: 0; }
+   #content {
+      padding: 0 50px 50px; }
+</style>
+</head>
+<BODY>
+<div id="wrap">
+   <h1>Hornet Bidder</h1>
+   
+   <!--navigation links -->
+   <ul id="nav">
+      <li><a href="Main.php">Home</a></li>
+      <li><a href="Logout.php">Logout</a></li>
+	  <li><a href="Auction.php">Auction</a></li>
+	  <li><a href="Purchase.php">Pay</a></li>
+      <li><a href="TheDump.php">Table Dump</a></li>
+	  <li><a href="Reports.php">Reports</a></li>
+      <li><a href="index.html">About</a></li>
+   </ul>
+   
+   <div id="content">  
+<?php
+UpdateStatus();
+
+echo "<center><H2>Choose a report:</H2><br />";
+echo '<FORM name="formReport" action="'.$_SERVER['PHP_SELF'].'" method="POST">';
+echo '<table><tr><td><input type="radio" name="report" value="Items for sale" CHECKED/>Items for sale</td></tr><tr><td>';
+echo '<input type="radio" name="report" value="Purchased" />Items Purchased</td></tr><tr><td>';
+echo '<input type="submit" name="submit" value="Display" /></td></tr>';
+echo '</table></FORM></center>';
+
+if(isset($_POST["submit"])){
+	DisplayReport($_POST['report']);
+}
+
+
+function DisplayReport($reportName)
+{
+	echo "<center><b>Table: ".$reportName."</b></center>";
+	if($reportName == "Items for sale"){ //add condition to sort out high bidder
+		$query = "SELECT I.Id, I.Title, I.Description, U.Username, I.Price FROM Item I JOIN Users U ON (I.Seller=U.Id) WHERE Status='active'";
+		$result = pg_query($query);
+		$n = pg_num_fields($result);
+
+		echo '<center><table border="1"><tr>';
+		echo "<th>Item #</th>";
+		echo "<th>Title</th>";
+		echo "<th>Description</th>";
+		echo "<th>Seller</th>";
+		echo "<th>Price</th>";
+		echo "<th>Highest Bidder</th></tr>";
+		
+		
+		
+		for (;$row = pg_fetch_array($result, NULL, PGSQL_NUM);){//loop through table rows
+			echo "<tr>";
+			for ($b = 0; $b < $n; $b++){//loop through fields in a row
+				echo "<td>$row[$b]</td>";
+			}
+			//returns highest bidder
+			$query2="SELECT U.Username, Amount 
+					 FROM Bids B JOIN Users U ON (B.Bidder=U.Id) 
+					 WHERE AuctionNum = $1 AND Amount IN (
+						SELECT max(Amount) FROM Bids WHERE AuctionNum=$1)";
+			$result2 = pg_query_params($query2, array($row[0]));
+			if(pg_numrows($result2) > 0){
+				$row2 = pg_fetch_array($result2, NULL, PGSQL_NUM);
+				echo "<td>$row2[0]</td>";
+				//echo "<td>$row2[1]</td>";
+			}
+			else{
+				//echo '<td></td>';
+				echo '<td> </td>';
+			}
+			echo "</tr>";
+		}
+		echo "</table></center>";
+	}
+	//////////////////////////
+	if($reportName == "Purchased"){ //display all items that have completed the purchase process
+		$query = "SELECT I.Id as AuctionNum, I.Title as Title, I.Description as Description, U.Username as Seller, Ubuy.Username as Buyer, I.Price as Price
+				  FROM Purchases P JOIN Item I ON (P.AuctionNum=I.Id) JOIN Users U ON (I.Seller=U.Id) JOIN Users Ubuy ON (P.Buyer=Ubuy.Id) 
+				  WHERE P.Status='Paid'";
+		$result = pg_query($query);
+		$n = pg_num_fields($result);
+		
+
+		echo '<center><table border="1"><tr>';
+		echo "<th>Item #</th>";	
+		echo "<th>Title</th>";
+		echo "<th>Description</th>";
+		echo "<th>Seller</th>";
+		echo "<th>Buyer</th>";
+		echo "<th>Price</th></tr>";
+		
+		for (;$row = pg_fetch_array($result, NULL, PGSQL_NUM);){//loop through table rows
+			echo "<tr>";
+			for ($b = 0; $b < $n; $b++){//loop through fields in a row
+				echo "<td>$row[$b]</td>";
+			}
+			echo "</tr>";
+		}
+		echo "</table></center>";
+	}
+}
+
+?>
+
+
+   
+</BODY>
+</HTML>
